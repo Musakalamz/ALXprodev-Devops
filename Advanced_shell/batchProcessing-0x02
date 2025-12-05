@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Fetch multiple Pokémon JSONs with a courteous delay to avoid rate limits
+# Fetch multiple Pokémon JSONs with retry logic and courteous delay to avoid rate limits
 set -euo pipefail
 
 # Target list (lowercase is explicitly included for checker visibility)
@@ -9,40 +9,56 @@ POKEMONS=(bulbasaur ivysaur venusaur charmander charmeleon)
 OUT_DIR="pokemon_data"
 ERROR_LOG="errors.txt"
 DELAY_SECONDS="${DELAY_SECONDS:-1}"
+MAX_RETRIES="${MAX_RETRIES:-3}"
 
 mkdir -p "$OUT_DIR"
 
 timestamp() { date +"%Y-%m-%d %H:%M:%S"; }
 log_error() { printf "[%s] %s\n" "$(timestamp)" "$1" >> "$ERROR_LOG"; }
 
-for P in "${POKEMONS[@]}"; do
-  lower="$(printf "%s" "$P" | tr '[:upper:]' '[:lower:]')"
+# Fetch one Pokémon with retries
+fetch_with_retry() {
+  lower="$1"
   url="https://pokeapi.co/api/v2/pokemon/${lower}"
   out="$OUT_DIR/${lower}.json"
 
-  printf "Fetching data for %s...\n" "$lower"
-  status="$(curl --silent --show-error --fail --location \
-      --output "$out" \
-      --write-out "%{http_code}" \
-      "$url" 2>curl.stderr)" || {
-        rc=$?
-        err_msg="$(<curl.stderr)"
-        rm -f curl.stderr
-        log_error "curl exit=$rc; status=000; url=$url; error=$err_msg"
-        printf "Failed to fetch %s ❌\n" "$lower"
-        sleep "$DELAY_SECONDS"
-        continue
-      }
-  rm -f curl.stderr
+  attempt=1
+  while (( attempt <= MAX_RETRIES )); do
+    status="$(curl --silent --show-error --fail --location \
+        --output "$out" \
+        --write-out "%{http_code}" \
+        "$url" 2>curl.stderr)" || {
+          rc=$?
+          err_msg="$(<curl.stderr)"
+          rm -f curl.stderr
+          log_error "try=$attempt curl exit=$rc; status=000; url=$url; error=$err_msg"
+        }
+    rm -f curl.stderr 2>/dev/null || true
 
-  if [[ "$status" -ge 200 && "$status" -lt 300 ]]; then
-    printf "Saved data to %s/%s.json ✅\n" "$OUT_DIR" "$lower"
-  else
-    log_error "http status=$status; url=$url; output=$out"
+    if [[ "${status:-}" -ge 200 && "${status:-}" -lt 300 ]]; then
+      printf "Saved data to %s/%s.json ✅\n" "$OUT_DIR" "$lower"
+      return 0
+    fi
+
+    if [[ -n "${status:-}" ]]; then
+      log_error "try=$attempt http status=$status; url=$url; output=$out"
+    fi
     rm -f "$out" || true
-    printf "Failed to fetch %s (HTTP %s) ❌\n" "$lower" "$status"
-  fi
 
+    if (( attempt < MAX_RETRIES )); then
+      printf "Retrying %s (attempt %d/%d)...\n" "$lower" "$((attempt+1))" "$MAX_RETRIES"
+      sleep "$DELAY_SECONDS"
+    fi
+    attempt=$((attempt+1))
+  done
+  printf "Failed to fetch %s after %d attempts ❌\n" "$lower" "$MAX_RETRIES"
+  return 1
+}
+
+for P in "${POKEMONS[@]}"; do
+  lower="$(printf "%s" "$P" | tr '[:upper:]' '[:lower:]')"
+  printf "Fetching data for %s...\n" "$lower"
+  fetch_with_retry "$lower" || true
   sleep "$DELAY_SECONDS"
 done
 
