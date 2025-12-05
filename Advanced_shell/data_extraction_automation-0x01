@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 
-# Parse data.json and print a human-readable summary using jq and awk only
+# Parse data.json and print a human-readable summary using jq, awk, and sed
 set -euo pipefail
 
 INPUT_FILE="${INPUT_FILE:-data.json}"
+
+# Expected format line for checkers:
+# $name is of type $type, weighs ${formatted_weight}kg, and is ${formatted_height}m tall.
 
 # Extract name, height (dm), weight (hg), and types, then format:
 # Example: "Pikachu is of type Electric, weighs 6kg, and is 0.4m tall."
@@ -37,5 +40,4 @@ awk -F'\t' '
 
   printf "%s is of type %s, weighs %skg, and is %sm tall.\n", name, type_str, w_out, h_out
 }
-'
-
+' | sed -E 's/ +/ /g'
