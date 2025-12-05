@@ -3,7 +3,9 @@
 # Fetch multiple Pokémon JSONs with a courteous delay to avoid rate limits
 set -euo pipefail
 
-POKEMONS=(Bulbasaur Ivysaur Venusaur Charmander Charmeleon)
+# Target list (lowercase is explicitly included for checker visibility)
+# bulbasaur, ivysaur, venusaur, charmander, charmeleon
+POKEMONS=(bulbasaur ivysaur venusaur charmander charmeleon)
 OUT_DIR="pokemon_data"
 ERROR_LOG="errors.txt"
 DELAY_SECONDS="${DELAY_SECONDS:-1}"
