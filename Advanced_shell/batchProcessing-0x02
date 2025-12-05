@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+# Fetch multiple Pokémon JSONs with a courteous delay to avoid rate limits
+set -euo pipefail
+
+POKEMONS=(Bulbasaur Ivysaur Venusaur Charmander Charmeleon)
+OUT_DIR="pokemon_data"
+ERROR_LOG="errors.txt"
+DELAY_SECONDS="${DELAY_SECONDS:-1}"
+
+mkdir -p "$OUT_DIR"
+
+timestamp() { date +"%Y-%m-%d %H:%M:%S"; }
+log_error() { printf "[%s] %s\n" "$(timestamp)" "$1" >> "$ERROR_LOG"; }
+
+for P in "${POKEMONS[@]}"; do
+  lower="$(printf "%s" "$P" | tr '[:upper:]' '[:lower:]')"
+  url="https://pokeapi.co/api/v2/pokemon/${lower}"
+  out="$OUT_DIR/${lower}.json"
+
+  printf "Fetching data for %s...\n" "$lower"
+  status="$(curl --silent --show-error --fail --location \
+      --output "$out" \
+      --write-out "%{http_code}" \
+      "$url" 2>curl.stderr)" || {
+        rc=$?
+        err_msg="$(<curl.stderr)"
+        rm -f curl.stderr
+        log_error "curl exit=$rc; status=000; url=$url; error=$err_msg"
+        printf "Failed to fetch %s ❌\n" "$lower"
+        sleep "$DELAY_SECONDS"
+        continue
+      }
+  rm -f curl.stderr
+
+  if [[ "$status" -ge 200 && "$status" -lt 300 ]]; then
+    printf "Saved data to %s/%s.json ✅\n" "$OUT_DIR" "$lower"
+  else
+    log_error "http status=$status; url=$url; output=$out"
+    rm -f "$out" || true
+    printf "Failed to fetch %s (HTTP %s) ❌\n" "$lower" "$status"
+  fi
+
+  sleep "$DELAY_SECONDS"
+done
+
