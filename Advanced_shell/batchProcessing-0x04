@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+
+# Parallel fetch of multiple Pokémon with retries using background jobs and wait
+set -euo pipefail
+
+# bulbasaur, ivysaur, venusaur, charmander, charmeleon
+POKEMONS=(bulbasaur ivysaur venusaur charmander charmeleon)
+OUT_DIR="pokemon_data"
+ERROR_LOG="errors.txt"
+MAX_RETRIES="${MAX_RETRIES:-3}"
+
+mkdir -p "$OUT_DIR"
+
+timestamp() { date +"%Y-%m-%d %H:%M:%S"; }
+log_error() { printf "[%s] %s\n" "$(timestamp)" "$1" >> "$ERROR_LOG"; }
+
+fetch_with_retry() {
+  lower="$1"
+  url="https://pokeapi.co/api/v2/pokemon/${lower}"
+  out="$OUT_DIR/${lower}.json"
+
+  attempt=1
+  while (( attempt <= MAX_RETRIES )); do
+    status="$(curl --silent --show-error --fail --location \
+        --output "$out" \
+        --write-out "%{http_code}" \
+        "$url" 2>curl.stderr)" || {
+          rc=$?
+          err_msg="$(<curl.stderr)"
+          rm -f curl.stderr
+          log_error "try=$attempt curl exit=$rc; status=000; url=$url; error=$err_msg"
+        }
+    rm -f curl.stderr 2>/dev/null || true
+
+    if [[ "${status:-}" -ge 200 && "${status:-}" -lt 300 ]]; then
+      printf "Saved data to %s/%s.json ✅\n" "$OUT_DIR" "$lower"
+      return 0
+    fi
+
+    if [[ -n "${status:-}" ]]; then
+      log_error "try=$attempt http status=$status; url=$url; output=$out"
+    fi
+    rm -f "$out" || true
+
+    attempt=$((attempt+1))
+    sleep 1
+  done
+  printf "Failed to fetch %s after %d attempts ❌\n" "$lower" "$MAX_RETRIES"
+  return 1
+}
+
+declare -a pids=()
+
+for P in "${POKEMONS[@]}"; do
+  printf "Starting fetch for %s in background...\n" "$P"
+  fetch_with_retry "$P" &
+  pids+=($!)
+done
+
+printf "Waiting for %d background jobs...\n" "${#pids[@]}"
+fail=0
+for pid in "${pids[@]}"; do
+  wait "$pid" || fail=$((fail+1))
+done
+printf "All background jobs finished. Failures: %d\n" "$fail"
+
