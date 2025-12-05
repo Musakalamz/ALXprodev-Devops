@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+# Strict mode for reliable automation
+set -euo pipefail
+
+# Configurable inputs with sensible defaults
+POKEMON="${POKEMON:-pikachu}"
+API_URL="https://pokeapi.co/api/v2/pokemon/${POKEMON}"
+OUTPUT_FILE="${OUTPUT_FILE:-data.json}"
+ERROR_LOG="${ERROR_LOG:-errors.txt}"
+
+# Timestamp helper for logs
+timestamp() { date +"%Y-%m-%d %H:%M:%S"; }
+
+# Append a structured error line to the error log
+log_error() {
+  printf "[%s] %s\n" "$(timestamp)" "$1" >> "$ERROR_LOG"
+}
+
+main() {
+  # Make API request; write body to OUTPUT_FILE and capture HTTP status
+  status="$(curl --silent --show-error --fail --location \
+    --output "$OUTPUT_FILE" \
+    --write-out "%{http_code}" \
+    "$API_URL" 2>curl.stderr)" || {
+      rc=$?
+      err_msg="$(<curl.stderr)"
+      rm -f curl.stderr
+      log_error "curl exit=$rc; status=000; url=$API_URL; error=$err_msg"
+      exit 1
+    }
+  rm -f curl.stderr
+
+  # Validate HTTP status range (2xx indicates success)
+  if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
+    log_error "http status=$status; url=$API_URL; output=$OUTPUT_FILE"
+    rm -f "$OUTPUT_FILE" || true
+    exit 1
+  fi
+
+  printf "Saved %s details to %s (HTTP %s)\n" "$POKEMON" "$OUTPUT_FILE" "$status"
+}
+
+main "$@"
+
